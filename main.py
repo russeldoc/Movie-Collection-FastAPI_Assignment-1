@@ -12,11 +12,11 @@ app = FastAPI()
 
 # Creating database table
 
-models.Base.metadata.create_all(bind=engine) 
+models.Base.metadata.create_all(bind=engine)
 
-# Pydantic Model
+# Pydantic Models
 
-class Movie(BaseModel):
+class MovieCreate(BaseModel):
     movie_id: int
     title: str
     director: str = Field(max_length=100)
@@ -48,6 +48,8 @@ def read_movies(db: db_dependency):
     return db.query(Movies).all()
 
 # Sort Movies
+# NOTE: this route must stay ABOVE /movies/{movie_id}, otherwise FastAPI
+# would try to match "sort" as a movie_id.
 @app.get("/movies/sort")
 def view_sorted_movies(
     db: db_dependency,
@@ -89,52 +91,60 @@ def view_sorted_movies(
 def get_movies(db: db_dependency, movie_id: int):
 
     specific_movie = db.query(Movies).filter(Movies.movie_id == movie_id).first()
-    
+
     if specific_movie is not None:
         return specific_movie
     else:
         raise HTTPException(status_code=404, detail='Movie not found')
-    
+
 # Create movie
-@app.post('/create_movies/')
-def create_movies(db: db_dependency, new_movie: Movie):
+@app.post('/create_movies', status_code=201)
+def create_movies(db: db_dependency, new_movie: MovieCreate):
+
+    existing_movie = db.query(Movies).filter(Movies.movie_id == new_movie.movie_id).first()
+
+    if existing_movie is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Movie with id {new_movie.movie_id} already exists"
+        )
+
     movie_model = Movies(**new_movie.model_dump())
     db.add(movie_model)
     db.commit()
+    db.refresh(movie_model)
 
-    return JSONResponse(status_code=201, content={'message': 'Movie created successfully'})
+    return movie_model
 
 # Update movie
 @app.put('/movies/{movie_id}')
 def update_specific_movies(db: db_dependency, movie_id: int, update_movie: MovieUpdate):
 
     movie = db.query(Movies).filter(Movies.movie_id == movie_id).first()
-    
+
     if movie is None:
         raise HTTPException(status_code=404, detail='Movie not found')
-    
+
     update_data = update_movie.model_dump(exclude_unset=True)
 
     for key, value in update_data.items():
         setattr(movie, key, value)
 
     db.commit()
+    db.refresh(movie)
 
-    return JSONResponse(status_code=200, content={'message': 'Movie updated successfully'})
+    return movie
 
 # Delete Movie
 @app.delete('/movies/{movie_id}')
 def delete_movies(db: db_dependency, movie_id: int):
 
     movie = db.query(Movies).filter(Movies.movie_id == movie_id).first()
-    
+
     if movie is None:
         raise HTTPException(status_code=404, detail='Movie not found')
-    
+
     db.query(Movies).filter(Movies.movie_id == movie_id).delete()
     db.commit()
 
     return JSONResponse(status_code=200, content={'message': 'Movie deleted successfully'})
-
-
-
